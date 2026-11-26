@@ -185,6 +185,57 @@ def main():
     fig.savefig(os.path.join(OUT, "dop_vs_incidence.png"), dpi=130)
     plt.close(fig)
 
+    # 8. Polarization path tracing and reference-frame diagnostics, rerun on
+    #    the produced geometry to verify the localisation conclusion. The
+    #    centre ray of each scene is traced stage by stage and checked
+    #    against the independent world-coherency oracle.
+    from polrender.diagnostics import (
+        diagnose, format_report, compare_degeneracy_policies,
+    )
+    from polrender.frames import initial_frame
+
+    diag_lines = ["", "=== polarization trace / reference-frame diagnosis ==="]
+    # Corrugated plane centre ray.
+    ops_plane = [("reflect", plane.normal_at(0.0), plane.n1, plane.n2),
+                 ("lens",), ("analyze", 0.0, 0.0)]
+    d_plane = diagnose(from_components(1.0, dop=1.0, psi_deg=30.0),
+                       initial_frame(np.array([0.0, 0.0, 1.0])),
+                       ops_plane, analyzer_angle=0.0)
+    diag_lines.append("[corrugated plane, centre ray]")
+    diag_lines.extend("  " + ln for ln in format_report(d_plane).splitlines())
+
+    # V-groove two-bounce ray.
+    ops_groove = [("reflect", groove.n_left, groove.n1, groove.n2),
+                  ("reflect", groove.n_right, groove.n1, groove.n2),
+                  ("lens",), ("analyze", 0.0, 0.0)]
+    d_groove = diagnose(from_components(1.0, dop=0.3, psi_deg=15.0),
+                        initial_frame(np.array([0.0, 0.0, -1.0])),
+                        ops_groove, analyzer_angle=0.0)
+    diag_lines.append("[V-groove, two-bounce ray]")
+    diag_lines.extend("  " + ln for ln in format_report(d_groove).splitlines())
+
+    # Measured degeneracy-policy choice (basis transport vs local reset).
+    pol = compare_degeneracy_policies(
+        from_components(1.0, dop=0.5, psi_deg=25.0),
+        initial_frame(np.array([1e-7, 0.0, -1.0]) / np.linalg.norm([1e-7, 0.0, -1.0])),
+        [("reflect", np.array([0.0, 0.0, 1.0]), 1.0, 1.5), ("lens",),
+         ("analyze", 0.0, 0.0)])
+    diag_lines.append(
+        f"[degeneracy policy measurement] delta={pol['delta']:.3e} "
+        f"equivalent={pol['equivalent']} recommended={pol['recommended']}")
+    report.extend(diag_lines)
+
+    # Save a per-stage trace table for the V-groove ray.
+    with open(os.path.join(OUT, "polarization_trace.txt"), "w") as fh:
+        fh.write("\n".join(diag_lines) + "\n")
+        fh.write("\nV-groove per-stage trace\n")
+        for st in d_groove["trace"].stages:
+            rot = ("n/a" if st.basis_rotation_deg is None
+                   else f"{st.basis_rotation_deg:+.3f}")
+            fh.write(f"  #{st.index} {st.stage:9s} basis_rot={rot:>9s} deg "
+                     f"I={st.intensity:.6f} DoP={st.dop:.6f} "
+                     f"feasible={st.feasible}\n")
+
     report_text = "\n".join(report)
     with open(os.path.join(OUT, "report.txt"), "w") as fh:
         fh.write(report_text + "\n")

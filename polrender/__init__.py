@@ -22,6 +22,14 @@ from .mueller import (
 from .frames import initial_frame, lens_frame, transport_reflect
 from .path import PathEngine, PolarizedPath, no_light_path
 from .scene import PolarizedRenderer, CorrugatedPlane, VGroove, RenderResult
+from .diagnostics import (
+    classify_analyzer,
+    compare_degeneracy_policies,
+    diagnose,
+    format_report,
+    reverse_readout_check,
+    run_recipe,
+)
 
 __all__ = [
     "FeasibilityReport",
@@ -49,4 +57,10 @@ __all__ = [
     "CorrugatedPlane",
     "VGroove",
     "RenderResult",
+    "diagnose",
+    "format_report",
+    "classify_analyzer",
+    "reverse_readout_check",
+    "compare_degeneracy_policies",
+    "run_recipe",
 ]

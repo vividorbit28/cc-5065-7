@@ -128,12 +128,24 @@ check("crossed polarizer pair is a zero matrix (first row)",
       np.allclose(m_cross[0], 0.0, atol=1e-12))
 
 # Rotating the *input basis* versus the analyzer angle: physical equivalence.
+# The passive frame rotation R(b) re-expresses the SAME physical state, so a
+# lab-fixed analyzer (at lab angle 40) reads it at 40+b in the new components.
 for frame_ang in (0.0, 23.5, -51.0):
     s_rot = rotation(frame_ang) @ s0
     direct = analyzer_intensity(s_rot, 40.0)
-    equivalent = analyzer_intensity(s0, 40.0 - frame_ang)
+    equivalent = analyzer_intensity(s0, 40.0 + frame_ang)
     check(f"frame rotation {frame_ang:g} deg equivalent to analyzer shift",
           approx(direct, equivalent, rel=1e-12))
+
+# Analyzer convention is a true axis, not a mirror: for every linear input
+# the device passes light polarized along its +theta axis and extinguishes
+# theta+90. This fails for any state with U!=0 if the axis is mirrored.
+for psi in (0.0, 30.0, 45.0, 60.0, 120.0):
+    par = analyzer_intensity(linear(1.0, psi), psi)
+    cross = analyzer_intensity(linear(1.0, psi), psi + 90.0)
+    check(f"analyzer axis at +psi passes psi={psi:g}",
+          approx(par, 1.0, rel=1e-12) and abs(cross) < 1e-12,
+          f"I_par={par:.9f} I_cross={cross:.2e}")
 
 # --------------------------------------------------------------------------
 section("4. Fresnel interface: energy range, R+T=1, Brewster, normal incidence")
@@ -209,11 +221,11 @@ s_ref = np.array(path.stokes)
 for beta in (0.0, 17.0, 45.0, -83.0, 123.0):
     # R(beta) is the passive frame transform: rotating the reference
     # frame by +beta makes the same lab-fixed analyzer read at
-    # alpha+beta in the new components.
+    # alpha-beta in the new components.
     s_beta = rotation(beta) @ s_ref
     for alpha in (0.0, 30.0, 60.0, 90.0, 140.0):
         i_a = analyzer_intensity(s_ref, alpha)
-        i_b = analyzer_intensity(s_beta, alpha + beta)
+        i_b = analyzer_intensity(s_beta, alpha - beta)
         if not approx(i_a, i_b, rel=1e-10):
             check(f"invariance beta={beta} alpha={alpha}", False,
                   f"{i_a} vs {i_b}")
@@ -225,7 +237,7 @@ for beta in (0.0, 17.0, 45.0, -83.0, 123.0):
 # rotated frame, transformed back, equals the lab-frame analyzer.
 for beta in (12.5, -40.0, 90.0):
     for alpha in (0.0, 22.5, 67.5, 110.0):
-        lhs = rotation(-beta) @ linear_polarizer(alpha + beta) @ rotation(beta)
+        lhs = rotation(-beta) @ linear_polarizer(alpha - beta) @ rotation(beta)
         rhs = linear_polarizer(alpha)
         if not np.allclose(lhs, rhs, atol=1e-12):
             check(f"polarizer/rotation operator identity b={beta} a={alpha}",
@@ -246,7 +258,7 @@ for beta in (-60.0, -30.0, 30.0, 60.0, 90.0):
     moved = rotation(beta) @ base
     ok = all(
         approx(analyzer_intensity(base, a),
-               analyzer_intensity(moved, a + beta), rel=1e-12)
+               analyzer_intensity(moved, a - beta), rel=1e-12)
         for a in lab_angles
     )
     check(f"basis-only rotation beta={beta:g} leaves brightness unchanged", ok)
@@ -411,6 +423,170 @@ eng.analyze(p, 30.0)
 kinds = [e.kind for e in p.events]
 check("event chain recorded in physical order",
       kinds == ["reflect", "lens", "analyzer"], str(kinds))
+
+# --------------------------------------------------------------------------
+section("11. Polarization path tracing and reference-frame diagnostics")
+
+import polrender.mueller as _mueller
+import polrender.diagnostics as _diag
+import polrender.path as _pathmod
+from polrender.diagnostics import (
+    analyzer_intensity_map, classify_analyzer, compare_degeneracy_policies,
+    diagnose, format_report, reverse_readout_check, run_recipe,
+)
+
+# A generic two-mirror recipe with an oblique exit (exercises a real
+# ray->lens rotation, unlike the axis-aligned scenes).
+_nA = np.array([0.3, 0.1, 0.9]); _nA /= np.linalg.norm(_nA)
+_nB = np.array([-0.2, 0.35, 0.8]); _nB /= np.linalg.norm(_nB)
+_k_in = np.array([0.2, -0.15, -0.8]); _k_in /= np.linalg.norm(_k_in)
+_ops = [("reflect", _nA, 1.0, 1.5), ("reflect", _nB, 1.0, 1.5),
+        ("lens",), ("analyze", 30.0, 0.0)]
+
+# (a) The world-coherency oracle reproduces the kernel's transport exactly,
+#     independent of any local-frame bookkeeping, for mixed/elliptical input.
+for _dop, _psi, _chi in [(1.0, 0.0, 0.0), (0.7, 37.0, 12.0),
+                         (0.3, 120.0, -25.0), (0.0, 0.0, 0.0)]:
+    _src = from_components(1.0, dop=_dop, psi_deg=_psi, chi_deg=_chi)
+    _d = diagnose(_src, initial_frame(_k_in), _ops)
+    check(f"oracle agrees with transport (dop={_dop} psi={_psi} chi={_chi})",
+          _d["evidence"][1]["ok"] and _d["oracle_worst_residual"] < 1e-9,
+          f"residual {_d['oracle_worst_residual']:.2e}")
+
+# (b) A correct kernel diagnoses 'none' and every stage feasible.
+_src = from_components(1.0, dop=0.8, psi_deg=45.0)
+_good = diagnose(_src, initial_frame(_k_in), _ops, analyzer_angle=30.0)
+check("clean kernel -> cause none", _good["cause"] == "none",
+      format_report(_good))
+check("clean kernel -> all evidence OK",
+      all(e["ok"] for e in _good["evidence"]))
+check("state remains physical at every stage",
+      _good["final_dop"] <= 1.0 + 1e-9)
+check("diagnosis log cost is bounded",
+      _good["trace"].omitted == 0 and len(_good["trace"].stages) <= 64)
+
+# (c) Closed-form analyzer reference equals the matrix kernel bit-for-bit.
+for _a in (0.0, 37.0, 90.0, 143.0):
+    _ref = float(analyzer_intensity_map(_good["final_stokes"], _a))
+    _ker = analyzer_intensity(_good["final_stokes"], _a)
+    check(f"closed-form analyzer == kernel at {_a:g} deg",
+          abs(_ref - _ker) < 1e-12, f"{_ref:.9f} vs {_ker:.9f}")
+
+# (d) Extinction classification: a correct readout is 'ok'; injected
+#     mirror / angular-offset / scale faults are classified distinctly.
+def _probe_readout(fn):
+    return lambda state, ang: float(fn(np.asarray(state, float), ang))
+
+_cls_ok = classify_analyzer(_probe_readout(analyzer_intensity))
+check("classify: correct analyzer -> ok", _cls_ok["verdict"] == "ok",
+      str(_cls_ok["verdict"]))
+_cls_mirror = classify_analyzer(
+    _probe_readout(lambda s, a: analyzer_intensity(s, -a)))
+check("classify: mirrored axis -> sign", _cls_mirror["verdict"] == "sign",
+      str(_cls_mirror["verdict"]))
+_cls_shift = classify_analyzer(
+    _probe_readout(lambda s, a: analyzer_intensity(s, a + 15.0)))
+check("classify: angular offset -> angle", _cls_shift["verdict"] == "angle",
+      f"{_cls_shift['verdict']} offset={_cls_shift['offset_deg']:.2f}")
+_cls_scale = classify_analyzer(
+    _probe_readout(lambda s, a: 0.6 * analyzer_intensity(s, a)))
+check("classify: gain error -> scale", _cls_scale["verdict"] == "scale",
+      f"scale={_cls_scale['scale']:.3f}")
+
+# (e) Reverse-readout separates a sign error (analyzer operator) from a
+#     frame error (wrong lens rotation). Analyser sign: S_lens built with
+#     mirrored polarizer -> still sign after reversal.
+_lens_rot = 37.0
+_base = from_components(1.0, dop=0.9, psi_deg=22.0, chi_deg=8.0)
+_s_ray = _base
+_s_lens = rotation(_lens_rot) @ _s_ray
+_rev_ok = reverse_readout_check(_s_lens, _lens_rot, _lens_rot, analyzer_intensity)
+check("reverse readout: correct -> ok", _rev_ok["verdict"] == "ok",
+      f"{_rev_ok['verdict']}")
+_rev_frame = reverse_readout_check(
+    _s_lens, _lens_rot + 20.0, _lens_rot, analyzer_intensity)
+check("reverse readout: frame shift -> frame",
+      _rev_frame["verdict"] == "frame",
+      f"{_rev_frame['verdict']} shift={_rev_frame['frame_shift_deg']:+.2f}")
+
+# (f) Transport-fault detection: a scrambled reflection U-block in the
+#     kernel only must be attributed to the transport end, not the lens.
+_orig_refl = _pathmod.reflection
+def _bad_refl(n1, n2, cos_i):
+    m = _orig_refl(n1, n2, cos_i).copy()
+    m[2, 2] = -m[2, 2]
+    return m
+_pathmod.reflection = _bad_refl
+try:
+    _d_bad = diagnose(_src, initial_frame(_k_in), _ops)
+finally:
+    _pathmod.reflection = _orig_refl
+check("transport fault localised to transport end",
+      _d_bad["cause"] == "transport" and not _d_bad["evidence"][1]["ok"],
+      f"cause={_d_bad['cause']} worst={_d_bad['oracle_worst_residual']:.3e}")
+
+# (g) Lens-fault detection: mirroring the analyzer operator while the
+#     transport stays correct must be attributed to the lens-readout end.
+_orig_pol = _mueller.linear_polarizer
+def _mirror_pol(theta, extinction=0.0):
+    m0 = np.array([[(1 + extinction) / 2, (1 - extinction) / 2, 0.0, 0.0],
+                   [(1 - extinction) / 2, (1 + extinction) / 2, 0.0, 0.0],
+                   [0.0, 0.0, extinction, 0.0],
+                   [0.0, 0.0, 0.0, extinction]])
+    r = _mueller.rotation(theta)
+    return r @ m0 @ r.T
+_mueller.linear_polarizer = _mirror_pol
+_pathmod.linear_polarizer = _mirror_pol
+_diag.linear_polarizer = _mirror_pol
+try:
+    _d_lens = diagnose(_src, initial_frame(_k_in), _ops)
+finally:
+    _mueller.linear_polarizer = _orig_pol
+    _pathmod.linear_polarizer = _orig_pol
+    _diag.linear_polarizer = _orig_pol
+check("lens fault localised to lens-readout end",
+      _d_lens["cause"] == "lens-readout"
+      and _d_lens["evidence"][1]["ok"],
+      f"cause={_d_lens['cause']} classify={_d_lens['classification']['verdict']}")
+check("lens fault classified as sign",
+      _d_lens["classification"]["verdict"] == "sign"
+      and _d_lens["classification"]["sign"] < 0)
+
+# (h) State-physicality anomalies are localised to the offending stage and
+#     never silently clamped. Craft a deliberately unphysical source state.
+try:
+    diagnose(np.array([1.0, 2.0, 0.0, 0.0]), initial_frame(_k_in), _ops)
+    check("diagnostics reject unphysical source instead of clamping", False)
+except UnphysicalStokesError:
+    check("diagnostics reject unphysical source instead of clamping", True)
+
+# (i) Degeneracy-policy choice is measured, not assumed.
+_pol_cmp = compare_degeneracy_policies(
+    from_components(1.0, dop=0.5, psi_deg=25.0),
+    initial_frame(np.array([1e-7, 0.0, -1.0]) / np.linalg.norm([1e-7, 0.0, -1.0])),
+    [("reflect", np.array([0.0, 0.0, 1.0]), 1.0, 1.5), ("lens",),
+     ("analyze", 30.0, 0.0)])
+check("degeneracy policies measured equivalent near normal",
+      _pol_cmp["equivalent"] and _pol_cmp["delta"] < 1e-9,
+      f"delta={_pol_cmp['delta']:.3e}, recommended={_pol_cmp['recommended']}")
+
+# (j) A full trace records per-stage basis rotation, matrix and state; a
+#     tiny max_stages bound truncates logging without changing the result.
+_path_full, _trace_full = run_recipe(
+    PathEngine("transport"), _src, initial_frame(_k_in), _ops, max_stages=64)
+_path_tiny, _trace_tiny = run_recipe(
+    PathEngine("transport"), _src, initial_frame(_k_in), _ops, max_stages=2)
+check("trace records a matrix and state at every stage",
+      all(s.matrix is not None for s in _trace_full.stages)
+      and all(np.allclose(s.matrix @ s.state_in, s.state_out, atol=1e-12)
+              for s in _trace_full.stages))
+check("trace records a defined lens basis rotation",
+      next(s for s in _trace_full.stages
+           if s.stage == "lens").basis_rotation_deg is not None)
+check("bounded logging truncates trace but preserves final state",
+      _trace_tiny.truncated
+      and np.allclose(_path_tiny.stokes, _path_full.stokes, atol=1e-15),
+      _trace_tiny.log_cost())
 
 # --------------------------------------------------------------------------
 print("\n" + "=" * 70)

@@ -19,7 +19,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .frames import initial_frame, normalize, reflect_vector, transport_reflect
+from .frames import (
+    frame_rotation_angle, initial_frame, normalize, reflect_vector,
+    transport_reflect,
+)
 from .mueller import reflection, rotation
 from .path import PolarizedPath, PathEngine
 from .stokes import check_feasible, zero
@@ -94,15 +97,21 @@ class VGroove:
 
 
 def _lens_coordinates(frame):
-    """Orthographic camera looking toward -z: lens basis (x_world, y_world, k)."""
+    """Ray -> lens basis transform for the orthographic camera.
+
+    Lens basis (x_cam, y_cam, k) with x_cam=+x, y_cam=+y, k the outgoing
+    direction. The state is re-expressed with the exact passive rotation
+    ``frame_rotation_angle(frame, lens)`` so that a physical analyzer
+    fixed in the lens frame reads ``analyzer(theta)`` on ``R(a) S``. Using
+    the negated angle instead mirrors the U channel and is invisible for
+    Q-only states but wrong for any U!=0 state.
+    """
     e1, e2, k = frame
     x_cam = np.array([1.0, 0.0, 0.0])
     y_cam = np.array([0.0, 1.0, 0.0])
-    lens = (x_cam, y_cam, normalize(k))
-    # Signed angle from ray basis to lens basis.
-    c = float(np.clip(np.dot(e1, x_cam), -1, 1))
-    s = float(np.clip(np.dot(e1, y_cam), -1, 1))
-    angle = np.degrees(np.arctan2(s, c))
+    k = normalize(k)
+    lens = (x_cam, y_cam, k)
+    angle = frame_rotation_angle(frame, lens)
     return lens, angle
 
 

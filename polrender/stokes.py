@@ -134,11 +134,15 @@ def check_feasible(s: np.ndarray, tol: float = 1e-9,
 
 
 def sanitize(s: np.ndarray, tol: float = 1e-9) -> np.ndarray:
-    """Project a numerically perturbed state back onto the physical cone.
+    """Repair *numerical-noise* cone violations only; never mask real errors.
 
-    The true zero state is preserved. States whose intensity is non-positive
-    but whose polarized components are non-zero are an error, not silently
-    clamped, because they indicate a broken matrix chain.
+    The true zero state is preserved. A state whose polarized magnitude
+    exceeds its intensity by more than ``tol`` is an error of the matrix
+    chain (a genuine DoP>1), not a rounding artefact, and is raised rather
+    than silently projected onto the cone. Likewise a non-positive
+    intensity with non-zero polarized components is an error. This keeps
+    invalid computations observable in the diagnostics instead of being
+    clamped away.
     """
     s = np.array(s, dtype=float)
     i, q, u, v = s
@@ -150,8 +154,15 @@ def sanitize(s: np.ndarray, tol: float = 1e-9) -> np.ndarray:
                 f"polarized components, I={i:.6g}, |QUV|={pol:.6g}"
             )
         return zero()
-    if pol > i:
-        # Project onto the cone boundary, preserving orientation/handedness.
+    excess = pol - i
+    if excess > tol * max(1.0, abs(i)):
+        raise UnphysicalStokesError(
+            "cannot sanitize: DoP>1 beyond numerical noise, "
+            f"I={i:.6g}, |QUV|={pol:.6g} (DoP={pol / i:.6f}); "
+            "this indicates a broken matrix chain, not rounding"
+        )
+    if excess > 0.0:
+        # Within numerical noise only: project onto the cone boundary.
         scale = i / pol
         return np.array([i, q * scale, u * scale, v * scale])
     return s

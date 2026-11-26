@@ -37,12 +37,26 @@ def rotation(theta_deg: float) -> np.ndarray:
 
 
 def linear_polarizer(theta_deg: float, extinction: float = 0.0) -> np.ndarray:
-    """Ideal linear polarizer with transmission axis at angle theta from e1.
+    """Ideal linear polarizer with transmission axis at +theta from e1.
 
     extinction in [0, 1): transmitted intensity of the blocked eigenstate
-    (0 = perfect polarizer). The matrix is built in its principal frame
-    (diagonal) and rotated with R(theta), so the convention is identical
-    to the analyzer's frame transformation.
+    (0 = perfect polarizer). Rotating the *device* by theta means the
+    diagonal principal-frame matrix m0 (axis along e1) is conjugated by
+    the coordinate rotation:
+
+        P(theta) = R(theta)^T @ m0 @ R(theta)
+
+    i.e. P(theta) is the passive-frame version of "rotate the optic into
+    place". Its first row is (a, b cos2theta, b sin2theta, 0), so a state
+    linearly polarized at psi reads  I = a I + b |P| (cos2theta cos2psi
+    + sin2theta sin2psi) = a I + b |P| cos2(psi-theta): the device passes
+    light polarized parallel to +theta and extinguishes the orthogonal
+    axis at theta+90, for every psi (not only the psi=0 axis).
+
+    Using R(theta) m0 R(theta)^T instead would place the axis at -theta
+    (a mirror about e1). That bug is invisible for psi in {0, 90} but
+    swaps the 45/135 channels and mirrors every extinction position; it
+    is exercised explicitly by the diagnostics and acceptance tests.
     """
     tmax = 1.0
     tmin = float(extinction)
@@ -55,7 +69,7 @@ def linear_polarizer(theta_deg: float, extinction: float = 0.0) -> np.ndarray:
         [0.0, 0.0, 0.0, tmin],
     ])
     r = rotation(theta_deg)
-    return r @ m0 @ r.T
+    return r.T @ m0 @ r
 
 
 def analyzer_intensity(s: np.ndarray, theta_deg: float,

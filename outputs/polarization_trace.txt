@@ -1,0 +1,29 @@
+
+=== polarization trace / reference-frame diagnosis ===
+[corrugated plane, centre ray]
+  policy=transport  cause=none  (3 stages logged, 0 summarised away)
+    [OK ] all stages physical  (infeasible: )
+    [OK ] transport matches world-coherency oracle  (max residual 1.388e-17 at stage 0)
+    [OK ] lens readout rotation matches frame transport  (|applied - correct rotation|=0.000e+00, shift=+0.000 deg)
+    [OK ] analyzer readout convention (sign/angle/scale)  (ok, sign=+1, offset=+0.000 deg, scale=1.000000)
+    [OK ] reverse readout separates sign from frame error  (ok, frame_shift=-0.000 deg)
+    extinction: ideal=[105.0, 130.0, 165.0] observed=[105.0, 130.0, 165.0]
+    reverse-readout: ok (frame shift -0.000 deg)
+    final I=0.001374 Q=0.001374 U=0.000000 V=0.000000 DoP=1.000000
+[V-groove, two-bounce ray]
+  policy=transport  cause=none  (4 stages logged, 0 summarised away)
+    [OK ] all stages physical  (infeasible: )
+    [OK ] transport matches world-coherency oracle  (max residual 6.939e-18 at stage 0)
+    [OK ] lens readout rotation matches frame transport  (|applied - correct rotation|=0.000e+00, shift=+0.000 deg)
+    [OK ] analyzer readout convention (sign/angle/scale)  (ok, sign=+1, offset=+0.000 deg, scale=1.000000)
+    [OK ] reverse readout separates sign from frame error  (ok, frame_shift=-0.000 deg)
+    extinction: ideal=[105.0, 130.0, 165.0] observed=[105.0, 130.0, 165.0]
+    reverse-readout: ok (frame shift -0.000 deg)
+    final I=0.000027 Q=0.000027 U=0.000000 V=0.000000 DoP=1.000000
+[degeneracy policy measurement] delta=0.000e+00 equivalent=True recommended=transport
+
+V-groove per-stage trace
+  #0 reflect   basis_rot=      n/a deg I=0.061093 DoP=0.900035 feasible=True
+  #1 reflect   basis_rot=      n/a deg I=0.005360 DoP=0.990340 feasible=True
+  #2 lens      basis_rot=  -90.000 deg I=0.005360 DoP=0.990340 feasible=True
+  #3 analyze   basis_rot=   +0.000 deg I=0.000027 DoP=1.000000 feasible=True

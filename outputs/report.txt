@@ -4,7 +4,7 @@
   reflected I range       : 0.040002 .. 0.102138
   per-pixel DoP range     : 1.000000 .. 1.000000
   incidence range [deg]   : 0.3102 .. 47.7148
-  center Stokes (lens)    : I=0.102132 Q=-0.102132 U=0.000000 V=0.000000
+  center Stokes (lens)    : I=0.102132 Q=-0.102132 U=-0.000000 V=0.000000
   center DoP/DoLP/DoCP    : 1.000000 / 1.000000 / 0.000000
   center feasible         : True
   kernel warnings         : none
@@ -31,3 +31,26 @@
 [dark-state control] all image and Stokes values exactly 0: OK
 [degeneracy policy] max |I_transport - I_reset| = 0.000e+00
 [analyzer sweep] Imax=0.102132 Imin=0.000000 contrast=1.000000
+
+=== polarization trace / reference-frame diagnosis ===
+[corrugated plane, centre ray]
+  policy=transport  cause=none  (3 stages logged, 0 summarised away)
+    [OK ] all stages physical  (infeasible: )
+    [OK ] transport matches world-coherency oracle  (max residual 1.388e-17 at stage 0)
+    [OK ] lens readout rotation matches frame transport  (|applied - correct rotation|=0.000e+00, shift=+0.000 deg)
+    [OK ] analyzer readout convention (sign/angle/scale)  (ok, sign=+1, offset=+0.000 deg, scale=1.000000)
+    [OK ] reverse readout separates sign from frame error  (ok, frame_shift=-0.000 deg)
+    extinction: ideal=[105.0, 130.0, 165.0] observed=[105.0, 130.0, 165.0]
+    reverse-readout: ok (frame shift -0.000 deg)
+    final I=0.001374 Q=0.001374 U=0.000000 V=0.000000 DoP=1.000000
+[V-groove, two-bounce ray]
+  policy=transport  cause=none  (4 stages logged, 0 summarised away)
+    [OK ] all stages physical  (infeasible: )
+    [OK ] transport matches world-coherency oracle  (max residual 6.939e-18 at stage 0)
+    [OK ] lens readout rotation matches frame transport  (|applied - correct rotation|=0.000e+00, shift=+0.000 deg)
+    [OK ] analyzer readout convention (sign/angle/scale)  (ok, sign=+1, offset=+0.000 deg, scale=1.000000)
+    [OK ] reverse readout separates sign from frame error  (ok, frame_shift=-0.000 deg)
+    extinction: ideal=[105.0, 130.0, 165.0] observed=[105.0, 130.0, 165.0]
+    reverse-readout: ok (frame shift -0.000 deg)
+    final I=0.000027 Q=0.000027 U=0.000000 V=0.000000 DoP=1.000000
+[degeneracy policy measurement] delta=0.000e+00 equivalent=True recommended=transport

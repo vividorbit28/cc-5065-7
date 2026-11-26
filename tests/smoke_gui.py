@@ -21,7 +21,9 @@ from polrender.stokes import UnphysicalStokesError
 
 
 def main():
-    win = ExperimentWindow()
+    # Small render size: the pure-Python per-pixel kernel makes the widget
+    # layout test slow at full resolution, and the kernel logic is identical.
+    win = ExperimentWindow(width=20, height=12)
     assert win.last_result is not None, "initial computation did not run"
     assert win.last_result.valid.sum() > 0
 
@@ -81,6 +83,41 @@ def main():
     win._build_source = original
     win.run(None)
     assert win.text_status.get_text().startswith("OK")
+
+    # The polarization-state panel and the reference-frame diagnosis are
+    # driven by the same kernel: rotating the polarization direction must
+    # recompute the cause, keep the state physical, and keep the trace
+    # clean on a correct kernel.
+    win.sl_ext.set_val(0.0)
+    win.sl_dop.set_val(0.8)
+    for psi in (0.0, 17.0, 45.0, 90.0, 135.0):
+        win.sl_psi.set_val(psi)
+        diag = win.last_diagnosis
+        assert diag is not None, "diagnosis not computed"
+        assert diag["cause"] == "none", (psi, diag["cause"])
+        assert diag["reverse"]["verdict"] == "ok", (psi, diag["reverse"])
+        assert diag["final_dop"] <= 1.0 + 1e-9
+        assert win.ax_diag.texts, "cause panel empty"
+        # The ellipse panel must have drawn the measured state.
+        assert win.ax_ellipse.lines or win.ax_ellipse.texts
+    # An anomaly must be surfaced in the polarization-propagation panel
+    # (the status line) rather than silently drawn.
+    from polrender import diagnostics as _d
+    orig_eval = _d.diagnose
+    def faulty(*a, **k):
+        out = orig_eval(*a, **k)
+        out["cause"] = "lens-readout"
+        return out
+    import polrender.gui as _gui
+    _gui_diagnose = _gui.diagnose
+    _gui.diagnose = faulty
+    try:
+        win.run(None)
+        assert "DIAGNOSIS" in win.text_status.get_text()
+        assert not win.text_status.get_text().startswith("OK")
+    finally:
+        _gui.diagnose = _gui_diagnose
+    win.run(None)
 
     plt.close(win.fig)
     print("GUI smoke test passed: widget layout, kernel updates, "

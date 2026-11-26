@@ -22,6 +22,11 @@ import numpy as np
 from .mueller import analyzer_intensity, brewster_angle
 from .path import PathEngine
 from .scene import CorrugatedPlane, VGroove, PolarizedRenderer
+from .diagnostics import (
+    diagnose,
+    format_report,
+)
+from .frames import initial_frame
 from .stokes import (
     UnphysicalStokesError,
     check_feasible,
@@ -32,13 +37,21 @@ from .stokes import (
 )
 
 ANALYZER_ANGLES = (0.0, 45.0, 90.0, 135.0)
+# Image resolution of the interactive renderer. The per-pixel kernel is pure
+# Python, so this bounds the cost of every recompute; headless smoke tests
+# lower it. The reference-frame diagnostics add a fixed O(1) cost per run.
+RENDER_WIDTH = 220
+RENDER_HEIGHT = 120
 
 
 class ExperimentWindow:
-    def __init__(self):
+    def __init__(self, width: int = RENDER_WIDTH, height: int = RENDER_HEIGHT):
+        self.render_width = int(width)
+        self.render_height = int(height)
         self.renderer_transport = PolarizedRenderer("transport")
         self.renderer_reset = PolarizedRenderer("reset")
         self.last_result = None
+        self.last_diagnosis = None
         self.fig = plt.figure(figsize=(14.5, 9.0))
         self.fig.canvas.manager.set_window_title(
             "Polarization propagation experiment")
@@ -55,6 +68,10 @@ class ExperimentWindow:
         self.ax_sweep = self.fig.add_subplot(gs[1, 2])
         self.ax_text = self.fig.add_subplot(gs[1, 3])
         self.ax_text.axis("off")
+        # Third row: live polarization state (ellipse) + diagnostic cause.
+        self.ax_ellipse = self.fig.add_subplot(gs[2, 0])
+        self.ax_diag = self.fig.add_subplot(gs[2, 1:4])
+        self.ax_diag.axis("off")
 
         # Control axes.
         ctl = dict(facecolor="#eef0f3")
@@ -129,21 +146,33 @@ class ExperimentWindow:
             if self.rad_scene.value_selected.startswith("corrugated"):
                 scene = CorrugatedPlane(amplitude=0.35, period=2.0, n2=n2)
                 result = renderer.render_corrugated_plane(
-                    scene, source, width=220, height=120, extent=1.0,
+                    scene, source, width=self.render_width,
+                    height=self.render_height, extent=1.0,
                     analyzer_angles=ANALYZER_ANGLES,
                     extinction=float(self.sl_ext.val))
             else:
                 scene = VGroove(half_angle_deg=45.0, depth=1.0, n2=n2)
                 result = renderer.render_v_groove(
-                    scene, source, width=220, height=120,
+                    scene, source, width=self.render_width,
+                    height=self.render_height,
                     analyzer_angles=ANALYZER_ANGLES,
                     extinction=float(self.sl_ext.val))
             self.last_result = result
-            self._draw(result, source, n2)
+            policy = ("transport"
+                      if self.rad_policy.value_selected.startswith("transport")
+                      else "reset")
+            self.last_diagnosis = self._center_diagnosis(
+                scene, source, n2, policy)
             msg = "OK: kernel propagation succeeded"
             if result.diagnostics:
                 msg += " | warnings: " + " ; ".join(result.diagnostics[:3])
-            self._set_status(msg, ok=not result.diagnostics)
+            if self.last_diagnosis["cause"] != "none":
+                msg += (f" | DIAGNOSIS: {self.last_diagnosis['cause']} "
+                        f"(see polarization trace panel)")
+            self._set_status(msg, ok=not result.diagnostics
+                             and self.last_diagnosis["cause"] == "none",
+                             redraw=False)
+            self._draw(result, source, n2)
         except (UnphysicalStokesError, ValueError) as exc:
             # Failure is fed back into the polarization diagnostics area;
             # no unphysical state ever reaches the color conversion.
@@ -220,12 +249,78 @@ class ExperimentWindow:
         )
         self.ax_text.text(0.0, 0.97, txt, va="top", family="monospace",
                           fontsize=9)
+        if getattr(self, "last_diagnosis", None) is not None:
+            self._draw_state_panel(center, self.last_diagnosis)
         self.fig.canvas.draw_idle()
 
-    def _set_status(self, msg, ok):
+    def _center_diagnosis(self, scene, source, n2, policy):
+        """Run the reference-frame diagnostics on the representative ray.
+
+        Reconstructs the exact reflect (+ lens + analyze) op recipe for
+        the centre column and feeds it to :func:`diagnose`, so the cause
+        shown in the window comes from the same kernel that renders the
+        image -- never a hand-written verdict.
+        """
+        ext = float(self.sl_ext.val)
+        ana = float(self.sl_ana.val)
+        if isinstance(scene, CorrugatedPlane):
+            n = scene.normal_at(0.0)
+            ops = [("reflect", n, scene.n1, scene.n2),
+                   ("lens",), ("analyze", ana, ext)]
+            frame = initial_frame(np.array([0.0, 0.0, 1.0]))
+        else:
+            # Avoid the exact vertex: use an off-centre ray that hits both
+            # facets (matches the renderer's valid-pixel region).
+            n1v = scene.n_left
+            ops = [("reflect", n1v, scene.n1, scene.n2),
+                   ("reflect", scene.n_right, scene.n1, scene.n2),
+                   ("lens",), ("analyze", ana, ext)]
+            frame = initial_frame(np.array([0.0, 0.0, -1.0]))
+        return diagnose(source, frame, ops, policy=policy,
+                        analyzer_angle=ana, extinction=ext)
+
+    def _draw_state_panel(self, center, diag):
+        """Ellipse of the measured polarization state + cause/evidence text."""
+        ax = self.ax_ellipse
+        ax.clear()
+        dop, dolp, docp = degrees_of_polarization(center)
+        i = float(center[0])
+        if i > 1e-12 and dolp > 1e-12:
+            psi = 0.5 * np.degrees(np.arctan2(center[2], center[1]))
+            # Semi-axes of the polarization ellipse (normalised to I).
+            a_major = np.sqrt(0.5 * (1.0 + dolp)) * dop
+            a_minor = np.sqrt(max(0.0, 0.5 * (1.0 - dolp))) * dop
+            t = np.linspace(0.0, 2.0 * np.pi, 240)
+            pr = np.radians(psi)
+            x = (a_major * np.cos(t) * np.cos(pr)
+                 - a_minor * np.sin(t) * np.sin(pr))
+            y = (a_major * np.cos(t) * np.sin(pr)
+                 + a_minor * np.sin(t) * np.cos(pr))
+            ax.plot(x, y, lw=1.8, color="#1f5fbf")
+            ax.plot([0, a_major * np.cos(pr)], [0, a_major * np.sin(pr)],
+                    color="#c04a00", lw=1.0, ls="--")
+        else:
+            ax.text(0.5, 0.5, "unpolarized / dark", ha="center", va="center",
+                    fontsize=8, transform=ax.transAxes)
+        ax.axhline(0, color="gray", lw=0.4, alpha=0.5)
+        ax.axvline(0, color="gray", lw=0.4, alpha=0.5)
+        ax.set_xlim(-1.1, 1.1); ax.set_ylim(-1.1, 1.1)
+        ax.set_aspect("equal")
+        ax.set_title("measured polarization state", fontsize=9)
+        ax.set_xticks([]); ax.set_yticks([])
+
+        ax = self.ax_diag
+        ax.clear(); ax.axis("off")
+        text = format_report(diag)
+        color = "#1d6b1d" if diag["cause"] == "none" else "#7a1f1f"
+        ax.text(0.0, 0.98, "polarization trace / reference-frame diagnosis\n"
+                + text, va="top", family="monospace", fontsize=8.5, color=color)
+
+    def _set_status(self, msg, ok, redraw: bool = True):
         self.text_status.set_text(("" if ok else "!! ") + msg)
         self.text_status.set_color("#1d6b1d" if ok else "#7a1f1f")
-        self.fig.canvas.draw_idle()
+        if redraw:
+            self.fig.canvas.draw_idle()
 
 
 def main():

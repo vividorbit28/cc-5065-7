@@ -13,16 +13,24 @@ polrender/
   frames.py     3D 路径局部基 (e1,e2,k)、反射传输、近法线退化策略
   path.py       PolarizedPath / PathEngine：完整光路状态传播与事件审计
   scene.py      倾斜/波纹平面、V 形槽双反射场景与逐像素渲染器
-  gui.py        matplotlib 控件实验窗口（由内核驱动，失败回显诊断区）
+  diagnostics.py  偏振光路追踪 + 参考系诊断：逐级基变换记录、独立世界
+                  相干( Jones )预言机、消光分类(符号/角度/归一)、
+                  反转读出段、退化策略实测、有界日志
+  gui.py        matplotlib 控件实验窗口（由内核驱动，失败回显诊断区；
+                第三行含实测偏振态椭圆与参考系诊断证据链）
 tests/
-  acceptance.py 134 项解析与数值边界验收测试
-  smoke_gui.py  无头 GUI 冒烟测试（控件、错误反馈路径）
+  acceptance.py 165 项解析、数值边界与诊断取证验收测试
+  smoke_gui.py  无头 GUI 冒烟测试（控件、诊断面板、错误反馈路径）
 scripts/
   render_headless.py  无显示环境下生成全部图像、诊断与 npz 数据
-outputs/             渲染产物与 report.txt
+outputs/             渲染产物、report.txt、polarization_trace.txt
 ```
 
-## 如何启动界面
+## 如何启动界面（图形入口为主）
+
+图形实验窗口是偏振传播与诊断的**主入口**：渲染反射图像、实测偏振态椭圆
+与参考系诊断证据链都在同一窗口内由内核实时驱动。命令行/无头脚本仅用于
+在无显示环境复现同一结果（辅助用途）。
 
 ```bash
 # 1) 创建虚拟环境并安装依赖（本机无系统 pip/tkinter，使用 venv）
@@ -31,18 +39,21 @@ curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
 .venv/bin/python /tmp/get-pip.py
 .venv/bin/python -m pip install -r requirements.txt
 
-# 2) 启动实验窗口（需要任一交互式 matplotlib 后端：TkAgg / Qt5Agg 等）
+# 2) 启动实验窗口（图形入口；需要任一交互式 matplotlib 后端：TkAgg / Qt5Agg 等）
 .venv/bin/python -m polrender.gui
 ```
 
+窗口内旋转 `source psi`（偏振方向）会即时重算反射图像、偏振状态与诊断成因；
+异常在偏振传播面板（状态行与第三行证据链）中提示，而非静默出图。
+
 当前容器没有安装 Tk/Qt 且无 root 权限，交互窗口无法在此环境弹窗；
 窗口逻辑由 `tests/smoke_gui.py` 在 Agg 后端下完整验证。无显示时可用
-等价的无头流程复现窗口里的全部结果：
+等价的无头流程（辅助）复现窗口里的全部结果：
 
 ```bash
-.venv/bin/python scripts/render_headless.py   # 写 outputs/
-.venv/bin/python tests/acceptance.py          # 134 项验收
-.venv/bin/python tests/smoke_gui.py           # GUI 控件冒烟
+.venv/bin/python scripts/render_headless.py   # 写 outputs/（含 polarization_trace.txt）
+.venv/bin/python tests/acceptance.py          # 165 项验收
+.venv/bin/python tests/smoke_gui.py           # GUI 控件 + 诊断面板冒烟
 ```
 
 ## 实验窗口控件（全部由偏振内核驱动）
@@ -59,6 +70,21 @@ curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
 结果区：四个检偏角度的反射灰度图（统一色标）、总强度 I 图、DoP 图、
 Q/U 符号图、中心像素检偏角扫描曲线（含 Brewster 角标记）以及中心像素
 完整 Stokes 状态与可行性结论。
+
+## 偏振传播诊断窗口（与光照实验窗口联动）
+
+实验窗口的第三行专用于诊断，与控制滑块和反射图像**联动**：
+
+- **实测偏振态椭圆**：由中心像素在镜头系下的 Stokes 态当场算出
+  （长短轴来自 DoLP/DoP，方位来自 psi），随 `source psi` 旋转实时更新。
+- **参考系诊断面板**：对中心光线重建精确的反射(+镜头+检偏)算子序列，
+  交给 `diagnose()` 逐级追踪，打印证据链：各级可行性、与独立世界相干
+  预言机的残差、镜头读出旋转是否等于几何旋转、消光分类（符号/角度/归一）、
+  反转读出判定，最后给出**成因**（none / transport / lens-readout /
+  state-invalid）与有界日志成本。
+- 当成因为异常时，状态行（偏振传播界面）以红色 `!! ... DIAGNOSIS:` 提示，
+  而不是静默出图。旋转偏振方向、改折射率、换场景、换退化策略均会重算
+  图像、偏振状态与成因三者，保证“显示”与“实际运算”一致。
 
 ## 约定（必须完整，不能只乘一个角度装饰因子）
 
@@ -78,8 +104,41 @@ Q/U 符号图、中心像素检偏角扫描曲线（含 Brewster 角标记）以
    两种策略只相差一次坐标旋转，可观测强度逐位相同（验收与 report.txt）。
 6. 完全无光 `S=0` 是合法态，DoP 定义为 0（不做除 I）；
    `I<=0` 但 QUV 非零是错误，直接抛异常而不是静默钳制。
-7. 任何矩阵链输出先经 `sanitize`（仅修复 1e-12 级数值越界）再做
-   `check_feasible`；不可行状态不会进入图像/颜色转换。
+7. 任何矩阵链输出先经 `sanitize` 再做 `check_feasible`。`sanitize` **只**
+   修复 1e-9 级数值越界；DoP>1 超出数值噪声即视为链路错误并抛出，
+   绝不把无效计算夹紧成“看似可行”的状态。不可行状态不会进入图像/颜色转换。
+8. 理想偏振片 `P(theta)=R(theta)^T m0 R(theta)`，透光轴在 **+theta**：
+   任何线偏振输入 psi 都满足 `I(theta)=a I + b cos2(psi-theta)`，
+   平行透射 1、正交消光 0。若误写成 `R(theta) m0 R(theta)^T` 则轴在
+   -theta（对 psi=0/90 不可见，但交换 45/135 通道、镜像全部消光位置）。
+   该约定由 `tests/acceptance.py` 全 psi 显式覆盖，并由诊断分类器识别。
+9. 光线 → 镜头读出使用 `frame_rotation_angle(ray, lens)` 的精确被动旋转；
+   不得用取反的角度（后者仅对 Q-only 态不可见，对 U≠0 态镜像 U 通道）。
+
+## 偏振光路追踪与参考系诊断（`polrender/diagnostics.py`）
+
+诊断以“取证链”方式定位参考系/强度异常，结论必须来自实测：
+
+- **逐级记录**：每一次反射/传输/镜头读出/检偏记录局部基 `(e1,e2,k)`、
+  基旋转角、所用 Mueller 矩阵、进入/离开 Stokes 态、强度与 DoP，
+  且每个态都过物理锥检查；异常定位到具体级（stage）。
+- **独立预言机**：同一物理过程另用 **世界空间相干 (Jones) 矩阵** 传播，
+  完全不含光线局部基的旋转簿记。若内核与预言机残差 > 1e-9，即判为
+  **传输端**问题；否则再查读出端。预言机只与内核共享 Fresnel 振幅
+  （该物理已由验收独立验证），不共享参考系代码，故不会“同错同过”。
+- **消光分类**：用若干已知线偏振片探针测量消光角，拟合
+  `observed = s·ideal + d`。`s=-1` 判 **符号/镜像**，`|d|` 判 **角度偏移**，
+  平行透射比判 **归一 (scale)** 错误；三者分别报出。
+- **反转读出段**：镜头旋转是精确可逆的 `R(a)`。以几何角反转后重算检偏读数：
+  符号错误（检偏器算子本身镜像）在反转后依旧镜像；参考系错误表现为
+  前向读数整体偏移 `applied-geometric`。由此**区分符号错与参考系错**，
+  而不是把两者混为一谈。
+- **退化策略实测**：`compare_degeneracy_policies` 同时跑 transport 与 reset，
+  以检偏扫描差 `<1e-9` 判定二者等价，据此**实测**选择“运输上一段偏振基”
+  还是“每次交互重建局部正交系”，而非凭约定。
+- **有界日志**：`max_stages` 限制每级记录数，超出仅计汇总；
+  单次诊断成本 O(1)（约 0.02 s），与图像分辨率无关。
+- **不夹紧掩盖**：诊断对不可行光源/态直接抛出，`sanitize` 不吞掉真实 DoP>1。
 
 ## 验收依据（解析情形 + 数值边界）
 
@@ -93,7 +152,13 @@ Q/U 符号图、中心像素检偏角扫描曲线（含 Brewster 角标记）以
 - 近法线退化两种策略观测等价、精确法线反射各向同性；
 - V 形槽双反射可行性与能量范围、零光输入精确零输出；
 - 渲染器拒绝不可行光源、平行+交叉检偏强度和等于反射总 I；
-- 矩阵乘法次序与事件链顺序审计。
+- 矩阵乘法次序与事件链顺序审计；
+- **诊断取证（第 11 节）**：世界相干预言机与内核传输逐态一致（含部分偏振/椭圆）；
+  正确内核判 `none`、逐级可行；闭式检偏参考与矩阵内核逐位一致；
+  消光分类器分别识别符号/角度/归一注入错误；反转读出区分符号错与参考系错；
+  在**传输端**注入冲激被定位为 `transport`，在**读出端**注入镜像被定位为
+  `lens-readout` 且分类为 `sign`；不可行源被拒绝而非夹紧；退化策略实测等价；
+  有界日志截断但最终态不变。
 
 ## 当前模型忽略的效应（诊断边界）
 
