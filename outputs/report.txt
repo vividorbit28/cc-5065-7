@@ -1,0 +1,33 @@
+[plane_linear]
+  valid pixels            : 57600
+  intensity range         : 0.000000 .. 0.102138
+  reflected I range       : 0.040002 .. 0.102138
+  per-pixel DoP range     : 1.000000 .. 1.000000
+  incidence range [deg]   : 0.3102 .. 47.7148
+  center Stokes (lens)    : I=0.102132 Q=-0.102132 U=0.000000 V=0.000000
+  center DoP/DoLP/DoCP    : 1.000000 / 1.000000 / 0.000000
+  center feasible         : True
+  kernel warnings         : none
+[plane_partial]
+  valid pixels            : 57600
+  intensity range         : 0.002061 .. 0.063836
+  reflected I range       : 0.040000 .. 0.065897
+  per-pixel DoP range     : 0.500015 .. 0.950283
+  incidence range [deg]   : 0.3102 .. 47.7148
+  center Stokes (lens)    : I=0.065894 Q=-0.061771 U=-0.010261 V=0.000000
+  center DoP/DoLP/DoCP    : 0.950268 / 0.950268 / 0.000000
+  center feasible         : True
+  kernel warnings         : none
+[vgroove]
+  valid pixels            : 57600
+  intensity range         : 0.000027 .. 0.005333
+  reflected I range       : 0.005360 .. 0.005360
+  per-pixel DoP range     : 0.990340 .. 0.990340
+  incidence range [deg]   : 45.0000 .. 45.0000
+  center Stokes (lens)    : I=0.005360 Q=-0.005307 U=-0.000117 V=0.000000
+  center DoP/DoLP/DoCP    : 0.990340 / 0.990340 / 0.000000
+  center feasible         : True
+  kernel warnings         : none
+[dark-state control] all image and Stokes values exactly 0: OK
+[degeneracy policy] max |I_transport - I_reset| = 0.000e+00
+[analyzer sweep] Imax=0.102132 Imin=0.000000 contrast=1.000000
